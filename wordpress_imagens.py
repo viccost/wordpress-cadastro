@@ -1,83 +1,158 @@
+"""
+O principal objetivo desse módulo é facilitar o cadastro de produtos no wordpress, automatizando a etapa de renomeação e
+organização das imagens para que então sejam enviadas para o site.
+A ideia é que antes que seja realizado o cadastro dos produtos, seja realizado o upload das imagens no wordpress, e com
+o link dessas imagens em mãos é possível realizar o cadastro dos produtos já associando as
+imagens dos produtos, agilizando todo o processo. É na geração desses links, que estão associados aos nomes das imagens,
+que esse modulo se torna útil, manipulando as imagens, renomeando-as, gerando os links e os colocando numa planilha
+prontos para serem utilizados.
+
+Algumas configurações, como nomes de colunas, links e arquivos estão localizadas no arquivo constantes.py"""
+
 import os
 from pandas import DataFrame
-from modulos_externos.salvar_ajustar import gerar_dataframe, escolher_arquivo, salvar_arquivo_planilha, escolher_pasta
-from typing import List
+from modulos_externos.salvar_ajustar import (
+    gerar_dataframe,
+    escolher_arquivo,
+    salvar_arquivo_planilha,
+    escolher_pasta,
+)
+from typing import List, Union
+from constantes import *
 
-nome_coluna_num_fotos = "Numero Fotos"
-nome_coluna_nome = "NOME"
-nome_coluna_url = "URL"
-nome_coluna_fotos = "Fotos"
 
+class PlanilhaMapaImagens:
+    """Classe que representa a planilha que contém as informações para que sejam realizados os demais processos, apenas
+    por meio dessa classe é possível manipular a planilha selecionada.
 
-def renomear_varios_arquivos_subpastas_e_alterar_nomes() -> DataFrame:
-    """Utilizado para renomear arquivos conforme nome de uma planilha. A planilha deve conter, na coluna NOME,
-    o nome das pastas que estão contidas dentro da folder_images selecionadas. Na coluna URL, deve registrar o nome
-    para qual as imagens serão renomeadas. O formato das imagens pode ser informado através da variável image_format, e
-    não deve estar preenchido no nome da planilha. É importante ter um backup de suas imagens antes de iniciar o proces.
-    Uma nova coluna será gerada na planilha destino, destrinchando as URLS das imagens.
-
-    1º Seleção Pasta de Images
-    2º Seleção Arquivo XLSX.
-    3º Pasta Destino para salvar
-    5º Pasta Destino para salvar planilha
+    Sobre a planilha:
+    Deve conter, as colunas NOMES_SUBPASTAS e NOMES_URL (pode ter outras).
+    A coluna NOMES_SUBPASTAS deve ter os nomes das subpastas em que estão as
+    imagens. Obviamente essas subpastas devem estar dentro de uma pasta que será selecionada pelo usuário.
+    A coluna NOMES_URL, deve registrar o nome que será base para que as imagens dentro da respectiva subpasta sejam renomeadas
+    , seqguindo um sequêncial de nomebase-01, nomebase-02, nomebase-03...
     """
-    # exemplo com subpastas, não pode haver outras pastas senão aquelas que deseja renomear. Além disso, deve conter
-    # apenas pastas, e não arquivos.
 
-    folder_images = escolher_pasta()
-    planilha = gerar_dataframe(escolher_arquivo())
-    folder_destino = escolher_pasta()
-    num_imagens = []
-    image_format = 'jpg'
-    pastas_listadas_na_planilha = planilha[nome_coluna_nome]
-    nomes_url_imagens = planilha[nome_coluna_url]
+    def __init__(self, planilha: DataFrame):
+        self._planilha = planilha
+        self.valida()
 
-    input("ATENÇÃO FAÇA UM BACKUP DE SUA PASTA ANTES DE INICIAR O PROCEDIMENTO, AS IMAGENS SERÃO RECORTADAS"
-          "DE UMA PASTA PARA OUTRA. PRESS ANYKEY")
+    def valida(self):
+        ...
+
+    def dados_todas_as_subpastas(self) -> List:
+        return self._planilha[NOME_COLUNA_NOMES_SUBPASTAS]
+
+    def dados_todos_os_novos_nomes(self) -> List:
+        return self._planilha[NOME_COLUNA_NOVOS_NOMES]
+
+    def dados_contagem_fotos(self) -> List:
+        return self._planilha[NOME_COLUNA_CONTAGEM_FOTOS]
+
+    def mapa(self) -> List:
+        return self._planilha.to_dict(orient="records")
+
+    def numero_registros(self) -> int:
+        return len(self.mapa())
+
+    def adicionar_coluna_contagem_fotos(self, num_imagens: list):
+        self._planilha[NOME_COLUNA_CONTAGEM_FOTOS] = num_imagens
+
+    def adicionar_coluna_link_planilha(self, links: list):
+        self._planilha[NOME_COLUNA_CONTAGEM_FOTOS] = links
+
+    def salvar(self):
+        salvar_arquivo_planilha(self._planilha, NOME_PLANILHA_CONCLUIDA, "xlsx")
 
 
-    for index, folder_name in enumerate(pastas_listadas_na_planilha):  # identificando todas as pastas no PATH
-        file_number = 1
-        for image_name in os.listdir(folder_images + '\\' + folder_name):
-            os.rename(folder_images + '\\' + folder_name + '\\' + image_name,
-                      folder_destino + '\\' + folder_name + '\\' + f'{nomes_url_imagens[index]}-{file_number}'
-                                                                   f'.{image_format}')
+class Renomeador:
+    """Classe responsável por renomer as imagens e guardar a informação da contagem de fotos, informação que posterior
+    mente será utilizada para geração dos links"""
 
-            print(f"Arquivo [{image_name}] renomeado!")
-            file_number += 1
-        num_imagens.append(file_number)
-    planilha[nome_coluna_num_fotos] = num_imagens
-    return planilha
+    def __init__(self, dados_nomes_subpastas: List, dados_novos_nomes: List):
+        self.dados_nomes_subpastas = dados_nomes_subpastas
+        self.dados_novos_nomes = dados_novos_nomes
+        self.contagem_fotos = []
+
+    def _guardar_inf_de_contagem(self, contagem):
+        self.contagem_fotos.append(contagem)
+
+    def renomear_imagens_em_subpastas(self) -> None:
+        """A pasta selecionada não pode ter outras pastas senão aquelas que deseja renomear. Além disso, deve conter
+        apenas pastas, e não arquivos."""
+
+        folder_images = escolher_pasta("Selecione o local das imagens originais")
+        folder_destino = escolher_pasta("Selecione o local no qual as imagens renomeadas serão salvas")
+
+        input(
+            "ATENÇÃO FAÇA UM BACKUP DE SUA PASTA ANTES DE INICIAR O PROCEDIMENTO, AS IMAGENS SERÃO RECORTADAS"
+            "DE UMA PASTA PARA OUTRA. PRESS ANYKEY"
+        )
+
+        for index, nome_sub in enumerate(self.dados_nomes_subpastas):
+            contagem_arquivos = 0
+            try:
+                for image_name in os.listdir(folder_images + "\\" + nome_sub):
+                    contagem_arquivos += 1
+
+                    os.rename(
+                        folder_images + "\\" + nome_sub + "\\" + image_name,
+                        folder_destino
+                        + "\\"
+                        + f"{self.dados_novos_nomes[index]}-{contagem_arquivos}"
+                        f".{FORMATO_IMAGEM}",
+                    )
+                    print(f"Arquivo [{image_name}] renomeado!")
+            except OSError:
+                print(f"Erro com a pasta {nome_sub}")
+            self._guardar_inf_de_contagem(contagem_arquivos)
 
 
-def criar_lista_de_dados_coluna_imagens(planilha: DataFrame) -> List:
-    """"""
-    dados_coluna = []
+class GeradorLinks:
+    """Classe responsável por gerar os links das imagens e por criar uma lista com todos os conjuntos de links
+    criados. """
 
-    def criar_dados(url_imagem: str, num_imagens: int) -> str:
+    @staticmethod
+    def _gerar_link(url_imagem: str, numero_imagens: int) -> str:
         """Verifica quantas imagens tem e cria o registro como texto para ser adicionado na coluna de imagens"""
         imagens_str = []
-        num_imagens = int(num_imagens)
-        if num_imagens == 1:
-            imagens_str.append(
-                f"https://projetos.oxecommerce.com.br/ikastore/wp-content/uploads/2022/08/{url_imagem}-1.jpg")
+        if numero_imagens == 1:
+            imagens_str.append(f"{LINK_PROJETO}/{url_imagem}-1.{FORMATO_IMAGEM}")
         else:
-            for n in range(1, num_imagens+1):
-                imagens_str.append(f"https://projetos.oxecommerce.com.br/ikastore/wp-content/uploads/2022/08/{url_imagem}-{n}.jpg")
-        image_url_separated_by_quotes = '; '.join(imagens_str)
+            for n in range(1, numero_imagens + 1):
+                imagens_str.append(f"{LINK_PROJETO}/{url_imagem}-{n}.{FORMATO_IMAGEM}")
+        image_url_separated_by_quotes = "; ".join(imagens_str)
         return image_url_separated_by_quotes
 
-    for register, row in planilha.iterrows():
-        url_imagem = row[nome_coluna_url]
-        numero_fotos = row[nome_coluna_num_fotos]
-        dados_coluna.append(criar_dados(url_imagem, numero_fotos))
-    return dados_coluna
+    @staticmethod
+    def criar_lista_de_dados_links_imagens(
+        todos_os_novos_nomes: List, dados_contagem_fotos: List
+    ) -> Union[List, None]:
+        """"""
+        if len(todos_os_novos_nomes) == len(dados_contagem_fotos):
+            dados_coluna = []
+            for n in range(0, len(todos_os_novos_nomes)):
+                url_imagem = todos_os_novos_nomes[n]
+                numero_fotos = dados_contagem_fotos[n]
+                dados_coluna.append(GeradorLinks._gerar_link(url_imagem, numero_fotos))
+            return dados_coluna
+        else:
+            print("Os conjuntos de informações não possuem o mesmo tamanho.")
+            return
 
 
 if __name__ == "__main__":
-    mapa_imagens = renomear_varios_arquivos_subpastas_e_alterar_nomes()
-    # mapa_imagens = gerar_dataframe(escolher_arquivo())
-    coluna_imagens = criar_lista_de_dados_coluna_imagens(mapa_imagens)
-    mapa_imagens['Imagens'] = coluna_imagens
-    folder_destino = escolher_pasta()
-    salvar_arquivo_planilha(mapa_imagens, "Imagens Mapeadas", "xlsx", folder_destino)
+    planilha_mapa = PlanilhaMapaImagens(
+        gerar_dataframe(escolher_arquivo("Selecione a planilha mapa"))
+    )
+    renomeador = Renomeador(
+        planilha_mapa.dados_todas_as_subpastas(),
+        planilha_mapa.dados_todos_os_novos_nomes(),
+    )
+    renomeador.renomear_imagens_em_subpastas()
+    planilha_mapa.adicionar_coluna_contagem_fotos(renomeador.contagem_fotos)
+    dados_links = GeradorLinks.criar_lista_de_dados_links_imagens(
+        planilha_mapa.dados_todos_os_novos_nomes(), planilha_mapa.dados_contagem_fotos()
+    )
+    planilha_mapa.adicionar_coluna_link_planilha(dados_links)
+    planilha_mapa.salvar()
